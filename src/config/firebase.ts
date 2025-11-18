@@ -1,24 +1,21 @@
+// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
-// Optionally import the services that you want to use
-// import {...} from 'firebase/auth';
-// import {...} from 'firebase/database';
-// import {...} from 'firebase/firestore';
-// import {...} from 'firebase/functions';
-// import {...} from 'firebase/storage';
-
-// Initialize Firebase
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "api-key",
-  authDomain: "project-id.firebaseapp.com",
-  databaseURL: "https://project-id.firebaseio.com",
-  projectId: "project-id",
-  storageBucket: "project-id.appspot.com",
-  messagingSenderId: "sender-id",
-  appId: "app-id",
-  measurementId: "G-measurement-id",
+  apiKey: "AIzaSyBoePOof_6FNqxAl7pH_dPfUgJmCUnwV_w",
+  authDomain: "prayer-records-app.firebaseapp.com",
+  projectId: "prayer-records-app",
+  storageBucket: "prayer-records-app.appspot.com",
+  messagingSenderId: "839666099977",
+  appId: "1:839666099977:web:07ec29caba3696901395d8"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
-// For more information on how to access Firebase in your project,
-// see the Firebase documentation: https://firebase.google.com/docs/web/setup#access-firebase
+
+// Initialize Firestore
+export const db = getFirestore(app);
