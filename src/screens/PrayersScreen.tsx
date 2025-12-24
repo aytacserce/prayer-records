@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,9 +10,6 @@ import {
   Image,
 } from "react-native";
 import { s } from "react-native-size-matters";
-import { db } from "../config/firebase";
-import { collection, getDocs } from "firebase/firestore";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   parseISO,
   subDays,
@@ -25,7 +22,8 @@ import AppSafeView from "../components/AppSafeView";
 import { useTranslation } from "react-i18next";
 import { MaterialIcons } from "@expo/vector-icons";
 import CardFrame from "../components/CardFrame";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { DatabaseService } from "../services/storage"; // Import the local service
 
 type PrayerValue = "ontime" | "makeup" | number;
 type PrayerData = Record<string, PrayerValue>;
@@ -38,23 +36,18 @@ interface CountResult {
   voluntary: number;
 }
 
+// Helper logic stays the same but processes local JSON
 const countPrayers = (data: AllData, startDate?: Date): CountResult => {
   let ontime = 0,
     makeup = 0,
     voluntary = 0;
-
   for (const [dateStr, prayers] of Object.entries(data)) {
     const date = parseISO(dateStr);
     if (startDate && !isAfter(date, startDate)) continue;
-
     for (const [key, value] of Object.entries(prayers)) {
-      if (key === "voluntary" && typeof value === "number") {
-        voluntary += value;
-      } else if (value === "ontime") {
-        ontime++;
-      } else if (value === "makeup") {
-        makeup++;
-      }
+      if (key === "voluntary" && typeof value === "number") voluntary += value;
+      else if (value === "ontime") ontime++;
+      else if (value === "makeup") makeup++;
     }
   }
   return { ontime, makeup, voluntary };
@@ -64,57 +57,37 @@ const getDetailData = (data: AllData, startDate: Date) => {
   const result: Record<string, PrayerData> = {};
   for (const [dateStr, prayers] of Object.entries(data)) {
     const date = parseISO(dateStr);
-    if (isAfter(date, startDate)) {
-      result[dateStr] = { ...prayers };
-    }
+    if (isAfter(date, startDate)) result[dateStr] = { ...prayers };
   }
   return result;
 };
 
 const PrayersScreen: React.FC = () => {
   const { t } = useTranslation();
-  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [allData, setAllData] = useState<AllData>({});
   const [selectedRange, setSelectedRange] = useState<RangeType>(null);
   const [detailData, setDetailData] = useState<Record<string, PrayerData>>({});
 
   const navigation = useNavigation<any>();
-
   const today = new Date();
 
-  useEffect(() => {
-    const initUser = async () => {
-      const id = await AsyncStorage.getItem("userId");
-      setUserId(id);
-    };
-    initUser();
-  }, []);
+  // useFocusEffect refreshes stats every time you open this tab
+  useFocusEffect(
+    useCallback(() => {
+      const loadLocalData = async () => {
+        setLoading(true);
+        const data = await DatabaseService.getAllRecords();
+        setAllData(data || {});
+        setLoading(false);
+      };
+      loadLocalData();
+    }, [])
+  );
 
   const goToSettings = () => {
     navigation.getParent()?.navigate("SettingsScreen");
   };
-
-  const fetchAllData = async () => {
-    if (!userId) return;
-    setLoading(true);
-    try {
-      const querySnap = await getDocs(collection(db, userId));
-      const all: AllData = {};
-      querySnap.forEach((docSnap) => {
-        all[docSnap.id] = docSnap.data() as PrayerData;
-      });
-      setAllData(all);
-    } catch (err) {
-      console.error("❌ Error fetching prayers:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchAllData();
-  }, [userId]);
 
   const overall = countPrayers(allData);
   const lastYear = countPrayers(allData, subYears(today, 1));
@@ -126,8 +99,7 @@ const PrayersScreen: React.FC = () => {
     setSelectedRange(range);
     const startDate =
       range === "week" ? subDays(today, 7) : subMonths(today, 1);
-    const details = getDetailData(allData, startDate);
-    setDetailData(details);
+    setDetailData(getDetailData(allData, startDate));
   };
 
   if (loading) {
@@ -141,6 +113,22 @@ const PrayersScreen: React.FC = () => {
     );
   }
 
+  const StatRow = ({
+    icon,
+    label,
+    value,
+  }: {
+    icon: string;
+    label: string;
+    value: number | string;
+  }) => (
+    <View style={styles.statRow}>
+      <Text style={styles.iconCell}>{icon}</Text>
+      <Text style={styles.labelCell}>{label}:</Text>
+      <Text style={styles.valueCell}>{value}</Text>
+    </View>
+  );
+
   return (
     <AppSafeView>
       <View style={styles.screen}>
@@ -153,19 +141,8 @@ const PrayersScreen: React.FC = () => {
 
         <View style={styles.buttonsContainer}>
           <View style={styles.settingsContainer}>
-            <Pressable onPress={goToSettings} style={styles.refreshButton}>
+            <Pressable onPress={goToSettings} style={styles.settingsButton}>
               <MaterialIcons name="settings" size={s(22)} color="#4B5563" />
-            </Pressable>
-            <Text style={styles.title}>{t("settings")}</Text>
-          </View>
-          <View style={styles.refreshContainer}>
-            <Text style={styles.title}>{t("refresh")}</Text>
-            <Pressable onPress={fetchAllData} style={styles.refreshButton}>
-              {loading ? (
-                <ActivityIndicator size="small" color="#4B5563" />
-              ) : (
-                <MaterialIcons name="refresh" size={s(22)} color="#4B5563" />
-              )}
             </Pressable>
           </View>
         </View>
@@ -175,29 +152,37 @@ const PrayersScreen: React.FC = () => {
             {/* --- Overall --- */}
             <CardFrame width="48%" height="48%">
               <Text style={styles.cardTitle}>{t("overall")}</Text>
-              <Text style={styles.statText}>
-                ✅ {t("ontime")}: {overall.ontime}
-              </Text>
-              <Text style={styles.statText}>
-                🟠 {t("makeup")}: {overall.makeup}
-              </Text>
-              <Text style={styles.statText}>
-                ➕ {t("voluntary")}: {overall.voluntary}
-              </Text>
+              <View style={styles.statsContainer}>
+                <StatRow icon="✅" label={t("ontime")} value={overall.ontime} />
+                <StatRow icon="🟠" label={t("makeup")} value={overall.makeup} />
+                <StatRow
+                  icon="➕"
+                  label={t("voluntary")}
+                  value={overall.voluntary}
+                />
+              </View>
             </CardFrame>
 
             {/* --- Last Year --- */}
             <CardFrame width="48%" height="48%">
               <Text style={styles.cardTitle}>{t("lastYear")}</Text>
-              <Text style={styles.statText}>
-                ✅ {t("ontime")}: {lastYear.ontime}
-              </Text>
-              <Text style={styles.statText}>
-                🟠 {t("makeup")}: {lastYear.makeup}
-              </Text>
-              <Text style={styles.statText}>
-                ➕ {t("voluntary")}: {lastYear.voluntary}
-              </Text>
+              <View style={styles.statsContainer}>
+                <StatRow
+                  icon="✅"
+                  label={t("ontime")}
+                  value={lastYear.ontime}
+                />
+                <StatRow
+                  icon="🟠"
+                  label={t("makeup")}
+                  value={lastYear.makeup}
+                />
+                <StatRow
+                  icon="➕"
+                  label={t("voluntary")}
+                  value={lastYear.voluntary}
+                />
+              </View>
             </CardFrame>
 
             {/* --- Last Month --- */}
@@ -207,17 +192,23 @@ const PrayersScreen: React.FC = () => {
               onPress={() => handleRangeSelect("month")}
             >
               <Text style={styles.cardTitle}>{t("lastMonth")}</Text>
-
-              <Text style={styles.statText}>
-                ✅ {t("ontime")}: {lastMonth.ontime}
-              </Text>
-              <Text style={styles.statText}>
-                🟠 {t("makeup")}: {lastMonth.makeup}
-              </Text>
-              <Text style={styles.statText}>
-                ➕ {t("voluntary")}: {lastMonth.voluntary}
-              </Text>
-
+              <View style={styles.statsContainer}>
+                <StatRow
+                  icon="✅"
+                  label={t("ontime")}
+                  value={lastMonth.ontime}
+                />
+                <StatRow
+                  icon="🟠"
+                  label={t("makeup")}
+                  value={lastMonth.makeup}
+                />
+                <StatRow
+                  icon="➕"
+                  label={t("voluntary")}
+                  value={lastMonth.voluntary}
+                />
+              </View>
               <Text style={styles.detailsLink}>{t("seeDetails")}</Text>
             </CardFrame>
 
@@ -228,23 +219,28 @@ const PrayersScreen: React.FC = () => {
               onPress={() => handleRangeSelect("week")}
             >
               <Text style={styles.cardTitle}>{t("lastWeek")}</Text>
-
-              <Text style={styles.statText}>
-                ✅ {t("ontime")}: {lastWeek.ontime}
-              </Text>
-              <Text style={styles.statText}>
-                🟠 {t("makeup")}: {lastWeek.makeup}
-              </Text>
-              <Text style={styles.statText}>
-                ➕ {t("voluntary")}: {lastWeek.voluntary}
-              </Text>
-
+              <View style={styles.statsContainer}>
+                <StatRow
+                  icon="✅"
+                  label={t("ontime")}
+                  value={lastWeek.ontime}
+                />
+                <StatRow
+                  icon="🟠"
+                  label={t("makeup")}
+                  value={lastWeek.makeup}
+                />
+                <StatRow
+                  icon="➕"
+                  label={t("voluntary")}
+                  value={lastWeek.voluntary}
+                />
+              </View>
               <Text style={styles.detailsLink}>{t("seeDetails")}</Text>
             </CardFrame>
           </View>
         </View>
 
-        {/* --- Detail Modal --- */}
         <Modal transparent visible={!!selectedRange} animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -253,56 +249,15 @@ const PrayersScreen: React.FC = () => {
                   ? t("lastWeekDetails")
                   : t("lastMonthDetails")}
               </Text>
-
-              {/* Table Header */}
-              <View
-                style={{
-                  borderTopWidth: 1,
-                  borderTopColor: "#ccc",
-                  borderBottomWidth: 1,
-                  borderBottomColor: "#ccc",
-                  marginBottom: s(6),
-                }}
-              >
-                <View style={{ flexDirection: "row", paddingTop: s(4) }}>
-                  <Text style={[styles.tableCell, { flex: 1 }]}></Text>
-                  {["daw", "noon", "aft", "sun", "nig"].map((p) => (
-                    <Text
-                      key={p}
-                      style={[styles.tableCell, { fontSize: s(12) }]}
-                    >
-                      {t(p)}
-                    </Text>
-                  ))}
-                </View>
-                <View
-                  style={[
-                    styles.tableRow,
-                    {
-                      borderColor: "#ccc",
-                      paddingBottom: s(4),
-                      marginTop: s(2),
-                    },
-                  ]}
-                >
-                  <Text style={[styles.tableCell, { flex: 1 }]}>📆</Text>
-                  <Text style={styles.tableCell}>🌅</Text>
-                  <Text style={styles.tableCell}>☀️</Text>
-                  <Text style={styles.tableCell}>🌇</Text>
-                  <Text style={styles.tableCell}>🌆</Text>
-                  <Text style={styles.tableCell}>🌙</Text>
-                </View>
-              </View>
-
-              <ScrollView style={{ maxHeight: s(300) }}>
+              <ScrollView style={{ maxHeight: s(300), width: "100%" }}>
                 {Object.entries(detailData).length === 0 ? (
                   <Text>{t("noData")}</Text>
                 ) : (
                   Object.entries(detailData)
-                    .sort(([a], [b]) => (parseISO(a) > parseISO(b) ? 1 : -1))
+                    .sort(([a], [b]) => (parseISO(a) > parseISO(b) ? -1 : 1))
                     .map(([date, prayers]) => (
                       <View key={date} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, { flex: 1 }]}>
+                        <Text style={[styles.tableCell, { flex: 1.2 }]}>
                           {format(parseISO(date), "dd/MM")}
                         </Text>
                         {["dawn", "noon", "afternoon", "sunset", "night"].map(
@@ -342,34 +297,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: s(16),
     paddingBottom: s(12),
+    marginTop: s(-30),
   },
-  header: { fontSize: 40, fontWeight: "bold", color: "#333", marginTop: -20 },
+  header: { fontSize: 40, fontWeight: "bold", color: "#333", marginTop: -30 },
   image: { height: s(180), width: s(180) },
   buttonsContainer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     width: "100%",
-    marginTop: s(-16),
+    marginTop: s(-24),
   },
   settingsContainer: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-start",
-    width: "50%",
-  },
-  refreshContainer: {
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "flex-end",
-    width: "50%",
+    width: "100%",
   },
   title: {
     fontSize: s(18),
     fontWeight: "bold",
     color: "#2C2C2C",
   },
-  refreshButton: {
+  settingsButton: {
     marginLeft: s(8),
     marginRight: s(8),
     padding: s(4),
@@ -409,6 +359,35 @@ const styles = StyleSheet.create({
     fontSize: s(16),
     color: "#333",
     marginVertical: 2,
+  },
+  statsContainer: {
+    width: "100%",
+    paddingHorizontal: s(10),
+    marginTop: s(4),
+  },
+  statRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
+    marginVertical: s(3),
+  },
+  iconCell: {
+    width: s(22),
+    fontSize: s(14),
+    textAlign: "left",
+  },
+  labelCell: {
+    flex: 1,
+    fontSize: s(14),
+    color: "#333",
+    textAlign: "left",
+  },
+  valueCell: {
+    width: s(28),
+    fontSize: s(14),
+    fontWeight: "bold",
+    color: "#333",
+    textAlign: "right",
   },
   modalOverlay: {
     flex: 1,

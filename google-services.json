@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "839666099977",
+    "project_id": "prayer-records-app",
+    "storage_bucket": "prayer-records-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:839666099977:android:91b002e034ae17be1395d8",
+        "android_client_info": {
+          "package_name": "com.aytac.prayerrecords"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDK8mqiGc97tRKBPLFem7jKqJ9cryuC_Rk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

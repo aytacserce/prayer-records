@@ -1,18 +1,54 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Image, StyleSheet, View, Text, Modal, Pressable } from "react-native";
 import MainButton from "../components/MainButton";
 import AppSafeView from "../components/AppSafeView";
 import { s } from "react-native-size-matters";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import { db } from "../config/firebase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { v4 as uuidv4 } from "uuid";
 import { MaterialIcons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { addDays, format } from "date-fns";
 import { useTranslation } from "react-i18next";
-import i18n from "../i18n";
 import WheelPickerExpo from "react-native-wheel-picker-expo";
+import { DatabaseService } from "../services/storage";
+import { BackupService } from "../services/backup";
+import ConfettiCannon from "react-native-confetti-cannon";
+import { PrayerTimeService } from "../services/prayerTimes";
+import { useIsFocused } from "@react-navigation/native";
+
+import { Animated, Easing } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const PulseDot = () => {
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // Create a looping animation: Fade out -> Fade in
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.3,
+          duration: 800,
+          easing: Easing.ease,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 800,
+          easing: Easing.ease,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.pulseDot,
+        { opacity: opacity }, // Bind the animated value to style
+      ]}
+    />
+  );
+};
 
 const PRAYERS = [
   { key: "dawn", label: "dawn" },
@@ -23,10 +59,9 @@ const PRAYERS = [
 ];
 
 const HomeScreen = () => {
+  // --- 1. ALL HOOKS FIRST (NO EXCEPTIONS) ---
   const { t } = useTranslation();
 
-  const [userId, setUserId] = useState<string | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
   const [todayPrayers, setTodayPrayers] = useState<{ [key: string]: any }>({});
   const [typeModalVisible, setTypeModalVisible] = useState(false);
   const [dateModalVisible, setDateModalVisible] = useState(false);
@@ -35,90 +70,229 @@ const HomeScreen = () => {
   const [selectedPrayerKey, setSelectedPrayerKey] = useState<string | null>(
     null
   );
-
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [pickedDate, setPickedDate] = useState<Date>(new Date());
+  const [milestoneVisible, setMilestoneVisible] = useState(false);
+  const confettiRef = useRef<ConfettiCannon>(null);
+  const [prayerTimes, setPrayerTimes] = useState<any>(null);
+  const [cityName, setCityName] = useState<string | null>(null);
+  const isFocused = useIsFocused();
 
+  // --- 2. DEFINE VARIABLES AFTER ALL HOOKS ---
   const today = new Date();
-  const dateStr = today.toISOString().split("T")[0];
+  const dateStr = format(today, "yyyy-MM-dd");
 
-  const [currentLang, setCurrentLang] = useState(i18n.language || "en");
+  const getCurrentPrayerDate = (times: any) => {
+    const now = new Date();
+    const dateStr = format(now, "yyyy-MM-dd");
 
-  // --- Initialize anonymous user ---
+    // FALLBACK: If no times set, just use the calendar day
+    if (!times || !times.dawn) return dateStr;
+
+    const currentTimeMins = now.getHours() * 60 + now.getMinutes();
+    const [dawnH, dawnM] = times.dawn.split(":").map(Number);
+    const dawnMins = dawnH * 60 + dawnM;
+
+    if (currentTimeMins < dawnMins) {
+      return format(addDays(now, -1), "yyyy-MM-dd");
+    }
+    return dateStr;
+  };
+
+  const smartDate = getCurrentPrayerDate(prayerTimes);
+
+  // --- 3. ALL EFFECTS ---
   useEffect(() => {
-    const initUser = async () => {
-      let id = await AsyncStorage.getItem("userId");
-      if (!id) {
-        id = uuidv4();
-        await AsyncStorage.setItem("userId", id);
-      }
-      setUserId(id);
-      setLoadingUser(false);
-    };
-    initUser();
-  }, []);
-
-  useEffect(() => {
-    const loadLanguage = async () => {
-      const savedLang = await AsyncStorage.getItem("language");
-      if (savedLang) {
-        i18n.changeLanguage(savedLang);
-        setCurrentLang(savedLang);
-      }
-    };
-    loadLanguage();
-  }, []);
-
-  // --- Fetch today's prayers ---
-  useEffect(() => {
-    if (!userId) return;
-    const fetchToday = async () => {
+    const loadData = async () => {
       try {
-        const docRef = doc(db, userId, dateStr);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) setTodayPrayers(docSnap.data());
-        else setTodayPrayers({});
-      } catch (error: any) {
-        console.error("Failed to fetch today's prayers:", error.message);
+        // Use the smartDate directly
+        const data = await DatabaseService.getDayRecord(smartDate);
+        setTodayPrayers(data || {});
+        await BackupService.runBackup();
+      } catch (err) {
+        console.log("Load error:", err);
       }
     };
-    fetchToday();
-  }, [userId]);
 
-  // --- Update prayer doc ---
-  const updatePrayer = async (
+    if (isFocused) {
+      loadData();
+    }
+  }, [isFocused, smartDate]);
+
+  useEffect(() => {
+    const checkStore = async () => {
+      try {
+        const all = await DatabaseService.getAllRecords();
+        console.log("-----------------------------------------");
+        console.log("📂 LOCAL STORAGE DUMP:", JSON.stringify(all, null, 2));
+        console.log("-----------------------------------------");
+      } catch (e) {
+        console.log("Error reading storage:", e);
+      }
+    };
+    checkStore();
+  }, []);
+
+  useEffect(() => {
+    if (isFocused) {
+      const load = async () => {
+        const times = await PrayerTimeService.getTodayTimes();
+        setPrayerTimes(times);
+      };
+      load();
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    if (isFocused) {
+      const loadScreenData = async () => {
+        try {
+          // 1. Fetch Prayer Times
+          const times = await PrayerTimeService.getTodayTimes();
+          setPrayerTimes(times);
+
+          // 2. Fetch the City Name we just saved in Settings
+          const savedName = await AsyncStorage.getItem("userLocationName");
+          setCityName(savedName);
+
+          // 3. Load Prayer Records for the Smart Date
+          const targetDate = getCurrentPrayerDate(times);
+          const records = await DatabaseService.getDayRecord(targetDate);
+          setTodayPrayers(records || {});
+        } catch (err) {
+          console.log("Error refreshing HomeScreen:", err);
+        }
+      };
+      loadScreenData();
+    }
+  }, [isFocused]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Adding (prev: any) solves the implicit error
+      setPrayerTimes((prev: any) => (prev ? { ...prev } : null));
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const getActivePrayerKey = (times: any) => {
+    if (!times) return null;
+
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+
+    const toMins = (timeStr: string) => {
+      const [h, m] = timeStr.split(":").map(Number);
+      return h * 60 + m;
+    };
+
+    const d = toMins(times.dawn);
+    const n = toMins(times.noon);
+    const a = toMins(times.afternoon);
+    const s = toMins(times.sunset);
+    const i = toMins(times.night);
+
+    // Logic: "Which was the LAST prayer to start?"
+    if (currentTime >= i) return "night"; // It's after Isha
+    if (currentTime >= s) return "sunset"; // It's after Maghrib
+    if (currentTime >= a) return "afternoon"; // It's after Asr
+    if (currentTime >= n) return "noon"; // It's after Dhuhr (This will catch your 14:00)
+    if (currentTime >= d) return "dawn"; // It's after Fajr
+
+    return "night"; // If it's before Fajr (e.g., 4 AM), we are still in the Isha/Night window
+  };
+
+  const activeKey = getActivePrayerKey(prayerTimes);
+
+  const getPrayerTimeColor = (prayerKey: string, timeStr: string) => {
+    if (!timeStr || timeStr === "--:--") return "#9CA3AF";
+
+    // 1. Current Active Prayer is always Green
+    if (prayerKey === activeKey) return "#16A34A";
+
+    const order = ["dawn", "noon", "afternoon", "sunset", "night"];
+    const currentIndex = order.indexOf(activeKey || "");
+    const thisIndex = order.indexOf(prayerKey);
+
+    // 2. The "Night" Scenario Fix
+    if (activeKey === "night") {
+      const now = new Date();
+      const currentTime = now.getHours() * 60 + now.getMinutes();
+
+      // Get Dawn time in minutes to see if we are in "Early Morning" or "Late Night"
+      const dawnTimeStr = prayerTimes?.dawn || "00:00";
+      const [dH, dM] = dawnTimeStr.split(":").map(Number);
+      const dawnMins = dH * 60 + dM;
+
+      if (currentTime < dawnMins) {
+        // It's 3:00 AM: We are in the Night window, but Dawn/Noon etc. are UPCOMING today.
+        return "#9CA3AF"; // Grey
+      } else {
+        // It's 11:00 PM: We are in the Night window, and all other prayers today are PAST.
+        return "#EF4444"; // Red
+      }
+    }
+
+    // 3. Standard Logic for Dawn, Noon, Afternoon, Sunset
+    if (thisIndex < currentIndex) return "#EF4444"; // Red
+    return "#9CA3AF"; // Grey
+  };
+
+  // 2. Trigger confetti whenever the modal opens
+  useEffect(() => {
+    if (milestoneVisible && confettiRef.current) {
+      // Small delay to let the modal appear first
+      setTimeout(() => {
+        confettiRef?.current?.start();
+      }, 50);
+    }
+  }, [milestoneVisible]);
+
+  // Function to check if today is "Perfect"
+  const checkPerfectDay = (currentData: any) => {
+    const mandatoryKeys = ["dawn", "noon", "afternoon", "sunset", "night"];
+    // Check if every mandatory prayer is "ontime"
+    return mandatoryKeys.every((key) => currentData[key] === "ontime");
+  };
+
+  // --- 4. LOGIC FUNCTIONS ---
+  const updatePrayerLocal = async (
     field: string,
     value: any,
     customDate?: string
   ) => {
-    if (!userId) return;
-    const docDate = customDate || dateStr;
-    try {
-      const docRef = doc(db, userId, docDate);
-      await setDoc(docRef, { [field]: value }, { merge: true });
-      if (!customDate || customDate === dateStr) {
-        setTodayPrayers((prev) => ({ ...prev, [field]: value }));
+    const targetDate = customDate || getCurrentPrayerDate(prayerTimes);
+    await DatabaseService.saveDayRecord(targetDate, { [field]: value });
+    const currentlyDisplayedDate = getCurrentPrayerDate(prayerTimes);
+    if (targetDate === currentlyDisplayedDate) {
+      const updatedPrayers = { ...todayPrayers, [field]: value };
+      setTodayPrayers(updatedPrayers);
+
+      // MILESTONE CHECK: Triggered when "night" is marked "ontime"
+      if (field === "night" && value === "ontime") {
+        if (checkPerfectDay(updatedPrayers)) {
+          setMilestoneVisible(true);
+        }
       }
-    } catch (error: any) {
-      console.error("❌ Failed to update prayer:", error.message);
     }
+    await BackupService.markDataAsDirty();
+    await BackupService.runBackup();
   };
 
-  // --- Find last unmarked date ---
-  const findLastUnmarkedDate = async (prayerKey: string) => {
-    if (!userId) return dateStr;
+  const findLastUnmarkedDateLocal = async (prayerKey: string) => {
     let checkDate = addDays(today, -1);
-    while (true) {
+    const allData = await DatabaseService.getAllRecords();
+
+    for (let i = 0; i < 365; i++) {
       const dateString = format(checkDate, "yyyy-MM-dd");
-      const docRef = doc(db, userId, dateString);
-      const docSnap = await getDoc(docRef);
-      const data = docSnap.exists() ? docSnap.data() : {};
-      if (!data[prayerKey]) return dateString;
+      const dayData = allData[dateString] || {};
+      if (!dayData[prayerKey]) return dateString;
       checkDate = addDays(checkDate, -1);
     }
+    return dateStr;
   };
 
-  // --- Handle normal prayers ---
   const handlePress = (prayerKey: string) => {
     setSelectedPrayerKey(prayerKey);
     setTypeModalVisible(true);
@@ -128,7 +302,8 @@ const HomeScreen = () => {
     setTypeModalVisible(false);
     if (!selectedPrayerKey) return;
     if (type === "ontime") {
-      updatePrayer(selectedPrayerKey, "ontime");
+      const targetDate = getCurrentPrayerDate(prayerTimes);
+      await updatePrayerLocal(selectedPrayerKey, "ontime", targetDate);
     } else {
       setDateModalVisible(true);
     }
@@ -137,56 +312,51 @@ const HomeScreen = () => {
   const handleDateOption = async (option: "today" | "last" | "choose") => {
     setDateModalVisible(false);
     if (!selectedPrayerKey) return;
-    if (option === "today") updatePrayer(selectedPrayerKey, "makeup");
-    else if (option === "last") {
-      const lastDate = await findLastUnmarkedDate(selectedPrayerKey);
-      updatePrayer(selectedPrayerKey, "makeup", lastDate);
+    if (option === "today") {
+      // Use the smart date so makeup "today" also respects the midnight gap
+      const targetDate = getCurrentPrayerDate(prayerTimes);
+      await updatePrayerLocal(selectedPrayerKey, "makeup", targetDate);
+    } else if (option === "last") {
+      const lastDate = await findLastUnmarkedDateLocal(selectedPrayerKey);
+      await updatePrayerLocal(selectedPrayerKey, "makeup", lastDate);
     } else if (option === "choose") setDatePickerVisible(true);
   };
 
-  const onDatePicked = (event: any, date?: Date) => {
+  const onDatePicked = async (event: any, date?: Date) => {
     setDatePickerVisible(false);
     if (date && selectedPrayerKey) {
-      const pickedStr = date.toISOString().split("T")[0];
-      updatePrayer(selectedPrayerKey, "makeup", pickedStr);
+      const pickedStr = format(date, "yyyy-MM-dd");
+      await updatePrayerLocal(selectedPrayerKey, "makeup", pickedStr);
     }
   };
 
-  // --- Voluntary prayers logic ---
   const handleVoluntarySave = async () => {
     const units = parseInt(voluntaryUnits);
     if (isNaN(units) || units <= 0) return;
-
-    // Get the current voluntary count (default 0 if none)
     const currentUnits = todayPrayers.voluntary
       ? Number(todayPrayers.voluntary)
       : 0;
-
-    // Add the new units
     const newTotal = currentUnits + units;
 
-    // Save the new total
-    await updatePrayer("voluntary", newTotal);
-
-    // Reset modal state
+    await updatePrayerLocal("voluntary", newTotal);
     setVoluntaryUnits("0");
     setVoluntaryModalVisible(false);
   };
-
-  if (loadingUser || !userId) {
-    return (
-      <AppSafeView>
-        <View style={[styles.container, { justifyContent: "center" }]}>
-          <Text>Loading...</Text>
-        </View>
-      </AppSafeView>
-    );
-  }
 
   return (
     <AppSafeView>
       <View style={styles.container}>
         <Text style={styles.header}>{t("title")}</Text>
+
+        {prayerTimes && cityName ? (
+          <View style={styles.locationBadge}>
+            <MaterialIcons name="location-on" size={s(12)} color="#666" />
+            <Text style={styles.locationText}>{cityName}</Text>
+          </View>
+        ) : (
+          // Tiny spacer to keep layout consistent if badge is hidden
+          <View style={{ height: s(20) }} />
+        )}
 
         <Image
           source={require("../../assets/home-image.png")}
@@ -194,45 +364,70 @@ const HomeScreen = () => {
         />
 
         <View style={styles.content}>
-          {PRAYERS.map((p) => (
-            <MainButton key={p.key} onPress={() => handlePress(p.key)}>
-              <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text
-                  style={{ fontWeight: "bold", fontSize: s(16), color: "#333" }}
-                >
-                  {t(p.key)}
-                </Text>
-                {todayPrayers[p.key] && (
-                  <MaterialIcons
-                    name="check-circle"
-                    size={20}
-                    color={
-                      todayPrayers[p.key] === "ontime" ? "green" : "orange"
-                    }
-                    style={{ marginLeft: 8 }}
-                  />
-                )}
-              </View>
-            </MainButton>
-          ))}
+          {PRAYERS.map((p) => {
+            // 1. Logic check: Do we have valid times to show?
+            const hasTimes = !!prayerTimes;
+            const timeStr = hasTimes ? prayerTimes[p.key] : null;
+            const timeColor = getPrayerTimeColor(p.key, timeStr || "");
+            const isActive = hasTimes && p.key === activeKey;
 
-          {/* Voluntary Button */}
+            return (
+              <MainButton key={p.key} onPress={() => handlePress(p.key)}>
+                <View
+                  style={[
+                    styles.buttonInner,
+                    !hasTimes && { justifyContent: "center" }, // Center if no times
+                  ]}
+                >
+                  {/* Left Side (or Center) Group */}
+                  <View style={styles.labelGroup}>
+                    <Text style={styles.buttonLabel}>{t(p.key)}</Text>
+                    {todayPrayers[p.key] && (
+                      <MaterialIcons
+                        name="check-circle"
+                        size={s(18)}
+                        color={
+                          todayPrayers[p.key] === "ontime"
+                            ? "#16A34A"
+                            : "#F59E0B"
+                        }
+                        style={{ marginLeft: s(6) }}
+                      />
+                    )}
+                  </View>
+
+                  {/* Conditional Right Side: Only show if times are loaded */}
+                  {hasTimes && (
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center" }}
+                    >
+                      {isActive && !todayPrayers[p.key] && <PulseDot />}
+                      <Text style={[styles.timeLabel, { color: timeColor }]}>
+                        {timeStr}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </MainButton>
+            );
+          })}
+
           <MainButton onPress={() => setVoluntaryModalVisible(true)}>
-            <Text
-              style={{ fontWeight: "bold", fontSize: s(16), color: "#333" }}
-            >
-              {t("voluntary")}
-              {todayPrayers.voluntary && (
-                <Text style={{ color: "#3B82F6" }}>
-                  {" "}
-                  ({todayPrayers.voluntary})
-                </Text>
-              )}
-            </Text>
+            <View style={[styles.buttonInner, { justifyContent: "center" }]}>
+              <Text style={styles.buttonLabel}>
+                {t("voluntary")}
+                {todayPrayers.voluntary && (
+                  <Text style={{ color: "#3B82F6" }}>
+                    {" "}
+                    ({todayPrayers.voluntary})
+                  </Text>
+                )}
+              </Text>
+            </View>
           </MainButton>
         </View>
 
-        {/* ✅ Prayer Type Modal */}
+        {/* Prayer Type Modal */}
         <Modal transparent visible={typeModalVisible} animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -259,7 +454,7 @@ const HomeScreen = () => {
           </View>
         </Modal>
 
-        {/* ✅ Date Selection Modal */}
+        {/* Date Selection Modal */}
         <Modal transparent visible={dateModalVisible} animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -274,7 +469,7 @@ const HomeScreen = () => {
                 style={[styles.modalButton, { backgroundColor: "#3B82F6" }]}
                 onPress={() => handleDateOption("last")}
               >
-                <Text style={styles.modalButtonText}>{t("lastUnmarked")}</Text>
+                <Text style={styles.modalButtonText}>{t("lastOne")}</Text>
               </Pressable>
               <Pressable
                 style={[styles.modalButton, { backgroundColor: "#9333EA" }]}
@@ -292,26 +487,40 @@ const HomeScreen = () => {
           </View>
         </Modal>
 
-        {/* ✅ Voluntary Modal (wheel picker stays) */}
+        {/* Voluntary Modal */}
         <Modal transparent visible={voluntaryModalVisible} animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>{t("voluntary")}</Text>
               <Text style={{ marginBottom: 10 }}>{t("enterUnits")}</Text>
-
-              <View style={styles.inputContainer}>
-                <WheelPickerExpo
-                  height={150}
-                  width={100}
-                  initialSelectedIndex={Number(voluntaryUnits) || 0}
-                  items={Array.from({ length: 21 }, (_, i) => ({
-                    label: i.toString(),
-                    value: i.toString(),
-                  }))}
-                  onChange={({ item }) => setVoluntaryUnits(item.value)}
-                />
-              </View>
-
+              {voluntaryModalVisible && (
+                <View style={styles.inputContainer}>
+                  <WheelPickerExpo
+                    height={s(150)}
+                    width={s(120)}
+                    initialSelectedIndex={Number(voluntaryUnits) || 0}
+                    items={Array.from({ length: 21 }, (_, i) => ({
+                      label: i.toString(),
+                      value: i.toString(),
+                    }))}
+                    onChange={({ item }) =>
+                      item && setVoluntaryUnits(item.value)
+                    }
+                    // Use renderItem to solve the TypeScript error and the size issue
+                    renderItem={(item) => (
+                      <Text
+                        style={{
+                          fontSize: s(24), // Large enough to fill the space
+                          fontWeight: "bold",
+                          color: "#333",
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                    )}
+                  />
+                </View>
+              )}
               <Pressable
                 style={[styles.modalButton, { backgroundColor: "green" }]}
                 onPress={handleVoluntarySave}
@@ -323,6 +532,41 @@ const HomeScreen = () => {
                 onPress={() => setVoluntaryModalVisible(false)}
               >
                 <Text style={styles.modalButtonText}>{t("cancel")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Milestone Celebration Modal */}
+        <Modal transparent visible={milestoneVisible} animationType="slide">
+          <View style={styles.modalOverlay}>
+            {/* Put the cannon here, absolutely positioned to cover the screen */}
+            <ConfettiCannon
+              ref={confettiRef}
+              count={200} // Number of papers
+              origin={{ x: -10, y: 0 }} // Start from top-left corner
+              autoStart={false} // Wait for our signal
+              fadeOut={true}
+              fallSpeed={3000}
+              colors={["#FFD700", "#10B981", "#3B82F6", "#F59E0B"]} // Gold, Green, Blue, Orange
+            />
+
+            <View style={[styles.modalContent, { width: 300, padding: 30 }]}>
+              <View style={styles.milestoneIconContainer}>
+                <MaterialIcons name="stars" size={80} color="#FFD700" />
+              </View>
+
+              <Text style={styles.milestoneTitle}>{t("perfectDayTitle")}</Text>
+              <Text style={styles.milestoneText}>{t("perfectDayMsg")}</Text>
+
+              <Pressable
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: "#10B981", marginTop: 20 },
+                ]}
+                onPress={() => setMilestoneVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>{t("alhamdulillah")}</Text>
               </Pressable>
             </View>
           </View>
@@ -344,15 +588,70 @@ const HomeScreen = () => {
 export default HomeScreen;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", marginTop: -20 },
+  container: { flex: 1, alignItems: "center", marginTop: -65 },
   content: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
     gap: 6,
+    width: "100%",
+  },
+  locationBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F3F4F6", // Subtle grey background
+    paddingHorizontal: s(12),
+    paddingVertical: s(4),
+    borderRadius: s(15),
+    marginTop: s(4),
+    marginBottom: s(10),
+    alignSelf: "center", // Keeps it centered under the title
+  },
+  locationText: {
+    fontSize: s(11),
+    color: "#666",
+    fontWeight: "bold",
+    marginLeft: s(3),
+    textTransform: "uppercase", // Gives it a clean, labels-style look
+    letterSpacing: 0.5,
   },
   image: { height: s(180), width: s(180) },
   header: { fontSize: 40, fontWeight: "bold", color: "#333" },
+  buttonInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingHorizontal: s(15),
+    minHeight: s(40),
+  },
+  labelGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  buttonLabel: {
+    fontWeight: "700",
+    fontSize: s(16),
+    color: "#333",
+  },
+  timeLabel: {
+    fontSize: s(14),
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"], // Prevents numbers from shifting
+  },
+  pulseDot: {
+    width: s(8),
+    height: s(8),
+    borderRadius: s(4),
+    backgroundColor: "#EF4444",
+    marginRight: s(8),
+    // Glow effect for Android/iOS
+    shadowColor: "#EF4444",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -375,31 +674,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 5,
   },
-  modalButtonText: {
-    color: "white",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
+  modalButtonText: { color: "white", fontWeight: "bold", fontSize: 16 },
   inputContainer: {
-    marginBottom: 15,
+    marginVertical: s(20),
     alignItems: "center",
     justifyContent: "center",
+    width: "100%",
+    height: s(160),
   },
-  langSelector: {
-    position: "absolute",
-    top: 60,
-    right: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f2f2f2",
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
+  milestoneIconContainer: {
+    backgroundColor: "#FEF3C7",
+    padding: 15,
+    borderRadius: 60,
+    marginBottom: 15,
   },
-  langButton: { flexDirection: "row", alignItems: "center" },
-  flagText: { fontSize: 16, fontWeight: "600" },
+  milestoneTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  milestoneText: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+  },
 });

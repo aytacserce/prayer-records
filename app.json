@@ -2,6 +2,7 @@
   "expo": {
     "name": "prayer-records",
     "slug": "prayer-records",
+    "scheme": "prayer-records-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -12,22 +13,43 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "supportsTablet": true
-    },
     "android": {
+      "package": "com.aytac.prayerrecords",
+      "versionCode": 1,
+      "permissions": ["RECEIVE_BOOT_COMPLETED"],
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "prayer-records-app.firebaseapp.com",
+              "pathPrefix": "/confirm"
+            },
+            {
+              "scheme": "prayer-records-app"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-localization"
-    ]
+    "plugins": ["expo-localization"],
+    "extra": {
+      "eas": {
+        "projectId": "3ed71326-fbbe-4f5a-a7b8-eb3a754b7c75"
+      }
+    }
   }
 }

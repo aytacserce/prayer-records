@@ -7,6 +7,7 @@ import {
   GestureResponderEvent,
 } from "react-native";
 import React, { FC, ReactNode } from "react";
+import { s } from "react-native-size-matters";
 
 const BUTTON_FRAME_SOURCE = require("../../assets/main-button.png");
 
@@ -39,21 +40,20 @@ export default MainButton;
 
 const styles = StyleSheet.create({
   pressableWrapper: {
-    width: 400,
-    height: 100,
-    marginTop: -20,
-    marginBottom: -20,
+    width: s(200),
+    alignSelf: "center",
+    marginVertical: s(3),
   },
   imageBackground: {
-    flex: 1,
+    width: "100%",
+    aspectRatio: 4,
     justifyContent: "center",
     alignItems: "center",
   },
   innerContent: {
-    width: "70%",
-    height: 40,
+    width: "80%",
+    height: "100%",
     justifyContent: "center",
     alignItems: "center",
-    borderRadius: 8,
   },
 });
