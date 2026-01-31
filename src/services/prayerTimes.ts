@@ -1,5 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { format } from "date-fns";
 
 export const PrayerTimeService = {
   fetchMonthlyTimes: async () => {
@@ -10,20 +9,26 @@ export const PrayerTimeService = {
       if (!lat || !lon) return null;
 
       const now = new Date();
-      const month = now.getMonth() + 1; // JS months are 0-11
+      const month = now.getMonth() + 1;
       const year = now.getFullYear();
 
-      // Aladhan API - Method 13 is Diyanet (Turkey standard)
+      // Aladhan API - Method 13 (Diyanet)
       const url = `https://api.aladhan.com/v1/calendar?latitude=${lat}&longitude=${lon}&method=13&month=${month}&year=${year}`;
 
       const response = await fetch(url);
       const json = await response.json();
 
       if (json.code === 200) {
-        // We save the entire month array to storage
+        // FIX: Store an object containing the Month/Year tag AND the data
+        const storagePayload = {
+          month: month,
+          year: year,
+          data: json.data,
+        };
+
         await AsyncStorage.setItem(
           "monthly_timings",
-          JSON.stringify(json.data)
+          JSON.stringify(storagePayload),
         );
         return json.data;
       }
@@ -37,29 +42,41 @@ export const PrayerTimeService = {
   getTodayTimes: async () => {
     try {
       const stored = await AsyncStorage.getItem("monthly_timings");
-      if (!stored) {
-        console.log("⚠️ No stored timings found in AsyncStorage");
+      if (!stored) return null;
+
+      const parsedStorage = JSON.parse(stored);
+
+      // FIX: Check if the stored data matches the CURRENT month/year
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+
+      // If the stored data is from an old month (e.g., Dec 2025 vs Jan 2026)
+      if (
+        parsedStorage.month !== currentMonth ||
+        parsedStorage.year !== currentYear
+      ) {
+        console.log(
+          "⚠️ Stored data is stale (wrong month). Triggering refetch...",
+        );
+        // Option A: Return null to force your UI to trigger a fetch
         return null;
+
+        // Option B: You could call fetchMonthlyTimes() here directly,
+        // but it's usually safer to return null and let the UI handle the loading state.
       }
 
-      const monthlyData = JSON.parse(stored);
+      const monthlyData = parsedStorage.data;
 
-      // Safety check: Is monthlyData an array?
-      if (!Array.isArray(monthlyData)) {
-        console.log("⚠️ monthly_timings is not an array");
-        return null;
-      }
+      if (!Array.isArray(monthlyData)) return null;
 
-      const todayDay = new Date().getDate();
+      const todayDay = now.getDate();
       const todayData = monthlyData[todayDay - 1];
 
       if (todayData && todayData.timings) {
-        // Log this to verify the structure in your terminal
-        console.log("✅ Today's Timings Raw:", todayData.timings);
-
         return {
-          // We use split(" ")[0] to remove any "(+03)" timezone strings
           dawn: todayData.timings.Fajr.split(" ")[0],
+          sunrise: todayData.timings.Sunrise.split(" ")[0],
           noon: todayData.timings.Dhuhr.split(" ")[0],
           afternoon: todayData.timings.Asr.split(" ")[0],
           sunset: todayData.timings.Maghrib.split(" ")[0],
@@ -67,7 +84,6 @@ export const PrayerTimeService = {
         };
       }
 
-      console.log("⚠️ Could not find timings for day:", todayDay);
       return null;
     } catch (e) {
       console.error("❌ Error in getTodayTimes:", e);

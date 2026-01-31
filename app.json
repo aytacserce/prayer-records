@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "prayer-records",
+    "name": "Namaz Takip",
     "slug": "prayer-records",
     "scheme": "prayer-records-app",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -15,7 +15,7 @@
     },
     "android": {
       "package": "com.aytac.prayerrecords",
-      "versionCode": 1,
+      "versionCode": 4,
       "permissions": ["RECEIVE_BOOT_COMPLETED"],
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {

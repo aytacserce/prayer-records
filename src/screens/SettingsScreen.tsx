@@ -32,7 +32,7 @@ interface Hadith {
 const SettingsScreen = () => {
   const { t } = useTranslation();
   const [currentLang, setCurrentLang] = useState(i18n.language || "en");
-  const [isSubscribed, setIsSubscribed] = useState(true);
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const [subscriptionModal, setSubscriptionModal] = useState(false);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -94,7 +94,6 @@ const SettingsScreen = () => {
 
   useEffect(() => {
     const initSettings = async () => {
-      await AsyncStorage.setItem("subscribed", "true");
       const savedLang = await AsyncStorage.getItem("language");
       if (savedLang) {
         i18n.changeLanguage(savedLang);
@@ -173,7 +172,7 @@ const SettingsScreen = () => {
     }
     setLoading(true);
     const actionCodeSettings = {
-      url: "https://prayer-records-app.firebaseapp.com/confirm",
+      url: "https://prayer-records-app.firebaseapp.com",
       handleCodeInApp: true,
       android: { packageName: "com.aytac.prayerrecords", installApp: true },
     };
@@ -296,6 +295,52 @@ const SettingsScreen = () => {
 
         {/* SETTINGS CONTENT: Pushed to the bottom */}
         <View style={styles.settingsFooter}>
+          {/* Prayer Times Location Section */}
+          <View style={styles.rowContainer}>
+            <Text style={styles.label}>{t("location")}</Text>
+            <Text style={styles.rowDescription}>
+              {selectedLocation
+                ? `${t("currently")}: ${selectedLocation}`
+                : t("selectLocationInfo")}
+            </Text>
+
+            <View style={styles.searchSection}>
+              <TextInput
+                style={styles.locationInput}
+                placeholder={t("searchCityDistrict")}
+                value={searchQuery}
+                onChangeText={(text) => {
+                  setSearchQuery(text); // Immediate UI update for the input
+                  debouncedFetch(text); // Delayed API call
+                }}
+              />
+              {isSearching && (
+                <ActivityIndicator
+                  style={styles.searchLoader}
+                  size="small"
+                  color="#3B82F6"
+                />
+              )}
+            </View>
+
+            {/* Results Overlay */}
+            {searchResults.length > 0 && (
+              <View style={styles.resultsContainer}>
+                {searchResults.map((item, index) => (
+                  <Pressable
+                    key={index}
+                    style={styles.resultItem}
+                    onPress={() => handleSelectLocation(item)}
+                  >
+                    <Text style={styles.resultText} numberOfLines={1}>
+                      {item.display_name}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
+
           {/* Language Selection */}
           <View style={styles.rowContainer}>
             <View style={styles.rowTop}>
@@ -371,52 +416,6 @@ const SettingsScreen = () => {
                     </Text>
                   )}
                 </Pressable>
-              </View>
-            )}
-          </View>
-
-          {/* Prayer Times Location Section */}
-          <View style={styles.rowContainer}>
-            <Text style={styles.label}>{t("location")}</Text>
-            <Text style={styles.rowDescription}>
-              {selectedLocation
-                ? `${t("currently")}: ${selectedLocation}`
-                : t("selectLocationInfo")}
-            </Text>
-
-            <View style={styles.searchSection}>
-              <TextInput
-                style={styles.locationInput}
-                placeholder={t("searchCityDistrict")}
-                value={searchQuery}
-                onChangeText={(text) => {
-                  setSearchQuery(text); // Immediate UI update for the input
-                  debouncedFetch(text); // Delayed API call
-                }}
-              />
-              {isSearching && (
-                <ActivityIndicator
-                  style={styles.searchLoader}
-                  size="small"
-                  color="#3B82F6"
-                />
-              )}
-            </View>
-
-            {/* Results Overlay */}
-            {searchResults.length > 0 && (
-              <View style={styles.resultsContainer}>
-                {searchResults.map((item, index) => (
-                  <Pressable
-                    key={index}
-                    style={styles.resultItem}
-                    onPress={() => handleSelectLocation(item)}
-                  >
-                    <Text style={styles.resultText} numberOfLines={1}>
-                      {item.display_name}
-                    </Text>
-                  </Pressable>
-                ))}
               </View>
             )}
           </View>

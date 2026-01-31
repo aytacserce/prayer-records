@@ -8,6 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Image,
+  Dimensions,
 } from "react-native";
 import { s } from "react-native-size-matters";
 import {
@@ -23,7 +24,10 @@ import { useTranslation } from "react-i18next";
 import { MaterialIcons } from "@expo/vector-icons";
 import CardFrame from "../components/CardFrame";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
-import { DatabaseService } from "../services/storage"; // Import the local service
+import { DatabaseService } from "../services/storage";
+
+const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const isSmallDevice = SCREEN_HEIGHT < 700;
 
 type PrayerValue = "ontime" | "makeup" | number;
 type PrayerData = Record<string, PrayerValue>;
@@ -137,6 +141,7 @@ const PrayersScreen: React.FC = () => {
         <Image
           source={require("../../assets/prayers-image.png")}
           style={styles.image}
+          resizeMode="contain"
         />
 
         <View style={styles.buttonsContainer}>
@@ -297,10 +302,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: s(16),
     paddingBottom: s(12),
-    marginTop: s(-30),
   },
-  header: { fontSize: 40, fontWeight: "bold", color: "#333", marginTop: -30 },
-  image: { height: s(180), width: s(180) },
+  header: {
+    fontSize: isSmallDevice ? 36 : 40,
+    fontWeight: "bold",
+    color: "#333",
+    marginTop: -30,
+  },
+  image: {
+    height: isSmallDevice ? s(130) : s(180),
+    width: isSmallDevice ? s(130) : s(180),
+  },
   buttonsContainer: {
     flexDirection: "row",
     alignItems: "center",

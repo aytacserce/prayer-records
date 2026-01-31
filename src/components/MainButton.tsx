@@ -5,11 +5,15 @@ import {
   ImageBackground,
   View,
   GestureResponderEvent,
+  Dimensions,
 } from "react-native";
 import React, { FC, ReactNode } from "react";
 import { s } from "react-native-size-matters";
 
 const BUTTON_FRAME_SOURCE = require("../../assets/main-button.png");
+
+const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const isSmallDevice = SCREEN_HEIGHT < 700;
 
 type MainButtonProps = {
   children: ReactNode;
@@ -46,7 +50,7 @@ const styles = StyleSheet.create({
   },
   imageBackground: {
     width: "100%",
-    aspectRatio: 4,
+    aspectRatio: isSmallDevice ? 5 : 4,
     justifyContent: "center",
     alignItems: "center",
   },
